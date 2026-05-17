@@ -1,0 +1,104 @@
+services:
+# Layanan Aplikasi Utama (Laravel Octane + FrankenPHP)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: laravel_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_DEBUG=${APP_DEBUG:-false}
+      - DB_CONNECTION=pgsql
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_DATABASE=${DB_DATABASE:-hadir}
+      - DB_USERNAME=${DB_USERNAME:-hadir_user}
+      - DB_PASSWORD=${DB_PASSWORD:-S3cR3tP@ssw0rd}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CACHE_STORE=redis
+      - QUEUE_CONNECTION=redis
+      - SESSION_DRIVER=redis
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Perintah untuk menjalankan Octane
+    # command: --workers=4 --max-requests=500 --host=0.0.0.0 --port=8000
+    # command: ["php", "artisan", "octane:start", "--server=frankenphp", "--host=0.0.0.0", "--port=8000"]
+    command: ["octane:frankenphp", "--host=0.0.0.0", "--port=8000"]
+  
+  # Layanan Queue Worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: laravel_worker
+    restart: unless-stopped
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - DB_CONNECTION=pgsql
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_DATABASE=${DB_DATABASE:-hadir}
+      - DB_USERNAME=${DB_USERNAME:-hadir_user}
+      - DB_PASSWORD=${DB_PASSWORD:-S3cR3tP@ssw0rd}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CACHE_STORE=redis
+      - QUEUE_CONNECTION=redis
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Menimpa entrypoint untuk menjalankan queue worker
+    entrypoint: ["php", "artisan", "queue:work", "--tries=3", "--timeout=90"]
+    # command: ["queue:work", "--tries=3", "--timeout=90"]
+
+  # Layanan Database PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: laravel_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-hadir}
+      POSTGRES_USER: ${DB_USERNAME:-hadir_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-S3cR3tP@ssw0rd}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-hadir_user} -d ${DB_DATABASE:-hadir}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Layanan Redis (Cache & Queue)
+  redis:
+    image: redis:7-alpine
+    container_name: laravel_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 20 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
