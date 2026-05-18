@@ -1,16 +1,19 @@
-# Menggunakan image resmi FrankenPHP (Debian-based recommended)
+# Menggunakan image resmi FrankenPHP dengan PHP 8.4
 FROM dunglas/frankenphp:1-php8.4
 
-# 1. Install sistem dependencies yang diperlukan Composer & PHP
-# FrankenPHP menggunakan Debian secara default, jadi gunakan apt-get
+# 1. Install sistem dependencies
 RUN apt-get update && apt-get install -y \
     git \
     unzip \
     zip \
     libpq-dev \
+    libpng-dev \
+    libjpeg-dev \
+    libwebp-dev \
+    libfreetype6-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Install ekstensi PHP menggunakan script pembantu bawaan FrankenPHP
+# 2. Install ekstensi PHP yang dibutuhkan (Sesuai Master Prompt)
 RUN install-php-extensions \
     pdo_pgsql \
     pgsql \
@@ -20,32 +23,30 @@ RUN install-php-extensions \
     intl \
     zip \
     opcache \
-    bcmath
+    bcmath \
+    exif
 
-# 3. Ambil binari Composer dari image resmi (Metode paling aman & bersih)
+# 3. Ambil binari Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# 4. Pengaturan Produksi
+# 4. Pengaturan PHP untuk Produksi
 RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
-ENV SERVER_NAME=":80"
-ENV OCTANE_SERVER="frankenphp"
 
+# 5. Set Working Directory
 WORKDIR /app
 
-# 5. Optimasi Layer Docker: Copy file composer dulu agar tidak install ulang jika kode berubah
+# 6. Salin dependensi dulu untuk optimasi cache
 COPY composer.json composer.lock* ./
 RUN composer install --no-dev --optimize-autoloader --no-scripts --no-interaction
 
-# 6. Salin seluruh kode aplikasi
+# 7. Salin seluruh kode aplikasi
 COPY . .
 
-# 7. Pengaturan Izin (Sangat Penting untuk Laravel)
+# 8. Set Izin Folder (Penting untuk Laravel)
 RUN chown -R www-data:www-data /app/storage /app/bootstrap/cache
 
-# 8. Entrypoint sesuai standar Laravel Octane
-# ENTRYPOINT ["php", "artisan", "octane:frankenphp", "--host=0.0.0.0", "--port=80"]
-ENTRYPOINT ["php", "artisan"]
+# 9. Jalankan entrypoint script
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Berikan default command (bisa ditimpa saat docker-compose run)
-# CMD ["php", "artisan", "octane:start", "--server=frankenphp", "--host=0.0.0.0", "--port=80"]
-CMD ["octane:frankenphp", "--host=0.0.0.0", "--port=8000"]
+ENTRYPOINT ["entrypoint.sh"]

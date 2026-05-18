@@ -1,27 +1,17 @@
 services:
-# Layanan Aplikasi Utama (Laravel Octane + FrankenPHP)
+  # Aplikasi Utama (FrankenPHP + Octane)
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: laravel_app
+    container_name: hadir_app
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      - APP_ENV=${APP_ENV:-production}
-      - APP_DEBUG=${APP_DEBUG:-false}
-      - DB_CONNECTION=pgsql
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_DATABASE=${DB_DATABASE:-hadir}
-      - DB_USERNAME=${DB_USERNAME:-hadir_user}
-      - DB_PASSWORD=${DB_PASSWORD:-S3cR3tP@ssw0rd}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - CACHE_STORE=redis
-      - QUEUE_CONNECTION=redis
-      - SESSION_DRIVER=redis
+      - SERVER_NAME=:8000
+    env_file:
+      - .env
     volumes:
       - .:/app
     depends_on:
@@ -29,45 +19,48 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Perintah untuk menjalankan Octane
-    # command: --workers=4 --max-requests=500 --host=0.0.0.0 --port=8000
-    # command: ["php", "artisan", "octane:start", "--server=frankenphp", "--host=0.0.0.0", "--port=8000"]
-    command: ["octane:frankenphp", "--host=0.0.0.0", "--port=8000"]
-  
-  # Layanan Queue Worker
+    networks:
+      - hadir_network
+    command: []
+
+  # Queue Worker
   worker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: laravel_worker
+    container_name: hadir_worker
     restart: unless-stopped
-    environment:
-      - APP_ENV=${APP_ENV:-production}
-      - DB_CONNECTION=pgsql
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_DATABASE=${DB_DATABASE:-hadir}
-      - DB_USERNAME=${DB_USERNAME:-hadir_user}
-      - DB_PASSWORD=${DB_PASSWORD:-S3cR3tP@ssw0rd}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - CACHE_STORE=redis
-      - QUEUE_CONNECTION=redis
+    env_file:
+      - .env
     volumes:
       - .:/app
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    # Menimpa entrypoint untuk menjalankan queue worker
-    entrypoint: ["php", "artisan", "queue:work", "--tries=3", "--timeout=90"]
-    # command: ["queue:work", "--tries=3", "--timeout=90"]
+      - app
+    command: ["php", "artisan", "queue:work", "redis", "--tries=3", "--timeout=90"]
+    networks:
+      - hadir_network
 
-  # Layanan Database PostgreSQL
+  # Scheduler (Untuk Backup Database Otomatis)
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hadir_scheduler
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    depends_on:
+      - app
+    command: ["php", "artisan", "schedule:work"]
+    networks:
+      - hadir_network
+
+  # Database (PostgreSQL 16)
   postgres:
     image: postgres:16-alpine
-    container_name: laravel_postgres
+    container_name: hadir_postgres
     restart: unless-stopped
     ports:
       - "5432:5432"
@@ -77,27 +70,35 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-S3cR3tP@ssw0rd}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-hadir_user} -d ${DB_DATABASE:-hadir}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE}"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    networks:
+      - hadir_network
 
-  # Layanan Redis (Cache & Queue)
+  # Redis (Cache & Queue)
   redis:
     image: redis:7-alpine
-    container_name: laravel_redis
+    container_name: hadir_redis
     restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --save 20 1 --loglevel warning
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - hadir_network
+
+networks:
+  hadir_network:
+    driver: bridge
 
 volumes:
   postgres_data:
